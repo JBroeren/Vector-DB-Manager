@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  Database, Search, Plus, Settings, RotateCcw, BarChart3, 
+  Database, Search, Settings, RotateCcw, BarChart3, 
   Trash2, Edit, Eye, MoreHorizontal, ChevronLeft, ChevronRight,
   ChevronsLeft, ChevronsRight, Maximize2, Activity, Server,
   CheckCircle, AlertCircle, XCircle, Clock, Zap, Sun, Moon, Monitor
 } from 'lucide-react';
+import { getCurrentDbType } from '@/lib/db';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -15,117 +16,51 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
-interface WeaviateClass {
-  class: string;
-  properties?: Array<{
-    name: string;
-    dataType: string[];
-  }>;
-}
-
-interface DatabaseStats {
-  version: string;
-  totalClasses: number;
-  totalObjects: number;
-  classStats: Array<{
-    name: string;
-    objectCount: number;
-    properties: number;
-  }>;
-  modules: any;
-  nodeInfo: string;
-  clusterHealth?: {
-    nodes: Array<{
-      name: string;
-      status: string;
-      version: string;
-      gitHash: string;
-      stats: {
-        shardCount: number;
-        objectCount: number;
-      };
-      batchStats: {
-        ratePerSecond: number;
-      };
-      shards: Array<{
-        name: string;
-        class: string;
-        objectCount: number;
-        vectorIndexingStatus: string;
-        vectorQueueLength: number;
-      }>;
-    }>;
-    synchronized: boolean;
-    statistics: any[];
-  };
-  performanceMetrics?: {
-    totalNodes: number;
-    healthyNodes: number;
-    totalShards: number;
-    indexingShards: number;
-    totalBatchRate: number;
-    totalVectorQueue: number;
-  };
-  shardDetails?: Array<{
-    nodeName: string;
-    shardName: string;
-    className: string;
-    objectCount: number;
-    vectorIndexingStatus: string;
-    vectorQueueLength: number;
-  }>;
-}
-
-interface PaginationState {
-  currentPage: number;
-  totalPages: number;
-  pageSize: number;
-  totalItems: number;
-}
-
 export default function Home() {
-  const [classes, setClasses] = useState<WeaviateClass[]>([]);
+  const [classes, setClasses] = useState<Record<string, unknown>[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [selectedClass, setSelectedClass] = useState<string>('');
-  const [objects, setObjects] = useState<any[]>([]);
+  const [selectedClass, setSelectedClass] = useState('');
+  const [objects, setObjects] = useState<Record<string, unknown>[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showCreateClassModal, setShowCreateClassModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [viewingObject, setViewingObject] = useState<any>(null);
-  const [editingObject, setEditingObject] = useState<any>(null);
-  const [newObjectProperties, setNewObjectProperties] = useState<any>({});
-  const [selectedObjects, setSelectedObjects] = useState<Set<string>>(new Set());
+  const [viewingObject, setViewingObject] = useState<Record<string, unknown> | null>(null);
+  const [editingObject, setEditingObject] = useState<Record<string, unknown> | null>(null);
+  const [newObjectProperties, setNewObjectProperties] = useState({});
+  const [selectedObjects, setSelectedObjects] = useState(new Set());
   const [activeTab, setActiveTab] = useState('stats');
-  const [stats, setStats] = useState<DatabaseStats | null>(null);
-  const [newClassName, setNewClassName] = useState('');
-  const [newClassProperties, setNewClassProperties] = useState([{ name: '', dataType: 'string' }]);
-  const [pagination, setPagination] = useState<PaginationState>({
+  const [stats, setStats] = useState<Record<string, unknown> | null>(null);
+  const [pagination, setPagination] = useState({
     currentPage: 1,
     totalPages: 1,
     pageSize: 20,
     totalItems: 0
   });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
+  const [theme, setTheme] = useState('system');
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState(30); // seconds
+  const [refreshInterval, setRefreshInterval] = useState(30);
+  const [dbType, setDbType] = useState('weaviate');
+  const [isDbSwitching, setIsDbSwitching] = useState(false);
 
   useEffect(() => {
     checkConnection();
     fetchClasses();
     fetchStats();
+    fetchDbType();
+    
+    // Load current database type
+    const currentDbType = getCurrentDbType();
+    setDbType(currentDbType);
     
     // Load theme from localStorage
-    const savedTheme = localStorage.getItem('weaviate-manager-theme') as 'light' | 'dark' | 'system';
+    const savedTheme = localStorage.getItem('weaviate-manager-theme');
     if (savedTheme) {
       setTheme(savedTheme);
       applyTheme(savedTheme);
@@ -151,7 +86,17 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [autoRefresh, refreshInterval, activeTab]);
 
-  const applyTheme = (newTheme: 'light' | 'dark' | 'system') => {
+  const fetchDbType = async () => {
+    try {
+      const response = await fetch('/api/db/status');  // Assume new API route for status including type
+      const data = await response.json();
+      setDbType(data.dbType);
+    } catch (error) {
+      console.error('Error fetching DB type:', error);
+    }
+  };
+
+  const applyTheme = (newTheme: string) => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
 
@@ -163,7 +108,7 @@ export default function Home() {
     }
   };
 
-  const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
+  const handleThemeChange = (newTheme: string) => {
     setTheme(newTheme);
     localStorage.setItem('weaviate-manager-theme', newTheme);
     applyTheme(newTheme);
@@ -179,12 +124,50 @@ export default function Home() {
     localStorage.setItem('weaviate-manager-refresh-interval', seconds.toString());
   };
 
+  const handleDbTypeChange = async (newDbType: string) => {
+    if (newDbType === dbType) return;
+    
+    setIsDbSwitching(true);
+    try {
+      const response = await fetch('/api/db/switch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ dbType: newDbType }),
+      });
+      
+      if (response.ok) {
+        setDbType(newDbType);
+        localStorage.setItem('db-type', newDbType);
+        
+        // Reset all data and refetch
+        setClasses([]);
+        setObjects([]);
+        setSelectedClass('');
+        setStats(null);
+        
+        // Refetch data with new database
+        await checkConnection();
+        await fetchClasses();
+        await fetchStats();
+      } else {
+        console.error('Failed to switch database');
+
+      }
+    } catch (error) {
+      console.error('Error switching database:', error);
+    } finally {
+      setIsDbSwitching(false);
+    }
+  };
+
   const checkConnection = async () => {
     try {
       const response = await fetch('/api/weaviate/status');
       const data = await response.json();
       setIsConnected(data.connected);
-    } catch (error) {
+    } catch {
       setIsConnected(false);
     }
   };
@@ -214,7 +197,7 @@ export default function Home() {
         const fallbackResponse = await fetch('/api/weaviate/stats');
         const fallbackData = await fallbackResponse.json();
         setStats(fallbackData.stats);
-      } catch (fallbackError) {
+      } catch {
         console.error('Error fetching fallback stats:', error);
       }
     }
@@ -298,56 +281,56 @@ export default function Home() {
     fetchObjects(selectedClass, 1);
   };
 
-  const handleCreateObject = async () => {
-    if (!selectedClass) return;
-    
-    try {
-      const response = await fetch(`/api/weaviate/objects/${selectedClass}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ properties: newObjectProperties })
-      });
-      
-      if (response.ok) {
-        setShowCreateModal(false);
-        setNewObjectProperties({});
-        fetchObjects(selectedClass);
-        fetchStats();
-      }
-    } catch (error) {
-      console.error('Error creating object:', error);
-    }
-  };
+  // const handleCreateObject = async () => {
+  //   if (!selectedClass) return;
+  //   
+  //   try {
+  //     const response = await fetch(`/api/weaviate/objects/${selectedClass}`, {
+  //       method: 'POST',
+  //       headers: { 'Content-Type': 'application/json' },
+  //       body: JSON.stringify({ properties: newObjectProperties })
+  //     });
+  //     
+  //     if (response.ok) {
+  //       setShowCreateModal(false);
+  //       setNewObjectProperties({});
+  //       fetchObjects(selectedClass);
+  //       fetchStats();
+  //     }
+  //   } catch (error) {
+  //     console.error('Error creating object:', error);
+  //   }
+  // };
 
-  const handleCreateClass = async () => {
-    if (!newClassName) return;
-    
-    const classDefinition = {
-      class: newClassName,
-      properties: newClassProperties.filter(p => p.name).map(p => ({
-        name: p.name,
-        dataType: [p.dataType]
-      }))
-    };
-    
-    try {
-      const response = await fetch('/api/weaviate/schema', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(classDefinition)
-      });
-      
-      if (response.ok) {
-        setShowCreateClassModal(false);
-        setNewClassName('');
-        setNewClassProperties([{ name: '', dataType: 'string' }]);
-        fetchClasses();
-        fetchStats();
-      }
-    } catch (error) {
-      console.error('Error creating class:', error);
-    }
-  };
+  // const handleCreateClass = async () => {
+  //   if (!newClassName) return;
+  //   
+  //   const classDefinition = {
+  //     class: newClassName,
+  //     properties: newClassProperties.filter(p => p.name).map(p => ({
+  //       name: p.name,
+  //       dataType: [p.dataType]
+  //     }))
+  //   };
+  //   
+  //   try {
+  //     const response = await fetch('/api/weaviate/schema', {
+  //       method: 'POST',
+  //       headers: { 'Content-Type': 'application/json' },
+  //       body: JSON.stringify(classDefinition)
+  //     });
+  //     
+  //     if (response.ok) {
+  //       setShowCreateClassModal(false);
+  //       setNewClassName('');
+  //       setNewClassProperties([{ name: '', dataType: 'string' }]);
+  //       fetchClasses();
+  //       fetchStats();
+  //     }
+  //   } catch (error) {
+  //     console.error('Error creating class:', error);
+  //   }
+  // };
 
   const handleDeleteClass = async (className: string) => {
     try {
@@ -368,14 +351,14 @@ export default function Home() {
     }
   };
 
-  const handleViewObject = (obj: any) => {
+  const handleViewObject = (obj: Record<string, unknown>) => {
     setViewingObject(obj);
     setShowViewModal(true);
   };
 
-  const handleEditObject = (obj: any) => {
+  const handleEditObject = (obj: Record<string, unknown>) => {
     setEditingObject(obj);
-    setNewObjectProperties(obj.properties || {});
+    setNewObjectProperties((obj as Record<string, unknown>).properties as Record<string, unknown> || {});
     setShowEditModal(true);
   };
 
@@ -383,7 +366,7 @@ export default function Home() {
     if (!editingObject || !selectedClass) return;
     
     try {
-      const response = await fetch(`/api/weaviate/objects/${selectedClass}/${editingObject.id}`, {
+      const response = await fetch(`/api/weaviate/objects/${selectedClass}/${(editingObject as Record<string, unknown>).id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ properties: newObjectProperties })
@@ -425,7 +408,7 @@ export default function Home() {
     
     try {
       for (const objectId of selectedObjects) {
-        await handleDeleteObject(objectId);
+        await handleDeleteObject(objectId as string);
       }
       setSelectedObjects(new Set());
     } catch (error) {
@@ -434,8 +417,8 @@ export default function Home() {
   };
 
   const getClassProperties = () => {
-    const selectedClassData = classes.find(cls => cls.class === selectedClass);
-    return selectedClassData?.properties || [];
+    const selectedClassData = classes.find(cls => (cls as any).class === selectedClass);
+    return (selectedClassData as any)?.properties || [];
   };
 
   const toggleObjectSelection = (objectId: string) => {
@@ -448,7 +431,7 @@ export default function Home() {
     setSelectedObjects(newSelection);
   };
 
-  const formatObjectProperties = (properties: any) => {
+  const formatObjectProperties = (properties: Record<string, unknown>) => {
     if (!properties) return 'No properties';
     
     const formatted = Object.entries(properties)
@@ -463,7 +446,7 @@ export default function Home() {
     return formatted || 'Empty object';
   };
 
-  const highlightSearchText = (text: string, searchTerm: string): JSX.Element => {
+  const highlightSearchText = (text: string, searchTerm: string): React.JSX.Element => {
     if (!searchTerm || !text) {
       return <span>{text}</span>;
     }
@@ -492,7 +475,7 @@ export default function Home() {
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <Database className="h-6 w-6 text-primary mr-2" />
-              <h1 className="text-xl font-bold">Weaviate Manager</h1>
+              <h1 className="text-xl font-bold">{dbType.charAt(0).toUpperCase() + dbType.slice(1)} Manager</h1>
             </div>
             <div className={`flex items-center space-x-2 px-2 py-1 rounded text-sm ${
               isConnected 
@@ -519,6 +502,38 @@ export default function Home() {
                   <DialogTitle>Settings</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-6">
+                  <div>
+                    <Label className="text-sm font-medium">Database Type</Label>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <Button
+                        variant={dbType === 'weaviate' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => handleDbTypeChange('weaviate')}
+                        disabled={isDbSwitching}
+                        className="flex items-center space-x-2"
+                      >
+                        <Database className="h-4 w-4" />
+                        <span>Weaviate</span>
+                      </Button>
+                      <Button
+                        variant={dbType === 'qdrant' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => handleDbTypeChange('qdrant')}
+                        disabled={isDbSwitching}
+                        className="flex items-center space-x-2"
+                      >
+                        <Server className="h-4 w-4" />
+                        <span>Qdrant</span>
+                      </Button>
+                    </div>
+                    {isDbSwitching && (
+                      <div className="text-xs text-muted-foreground mt-2 flex items-center">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2"></div>
+                        Switching database...
+                      </div>
+                    )}
+                  </div>
+                  
                   <div>
                     <Label className="text-sm font-medium">Theme</Label>
                     <div className="grid grid-cols-3 gap-2 mt-2">
@@ -615,73 +630,8 @@ export default function Home() {
                 <Card className="h-full">
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">Collections</CardTitle>
+                      <CardTitle className="text-lg">{dbType === 'weaviate' ? 'Classes' : 'Collections'}</CardTitle>
                       <div className="flex space-x-1">
-                        <Dialog open={showCreateClassModal} onOpenChange={setShowCreateClassModal}>
-                          <DialogTrigger asChild>
-                            <Button size="sm" variant="outline">
-                              <Plus className="h-3 w-3" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Create Collection</DialogTitle>
-                            </DialogHeader>
-                            <div className="space-y-4">
-                              <div>
-                                <Label>Collection Name</Label>
-                                <Input
-                                  value={newClassName}
-                                  onChange={(e) => setNewClassName(e.target.value)}
-                                  placeholder="MyCollection"
-                                />
-                              </div>
-                              <div>
-                                <Label>Properties</Label>
-                                {newClassProperties.map((prop, index) => (
-                                  <div key={index} className="flex space-x-2 mt-2">
-                                    <Input
-                                      placeholder="Property name"
-                                      value={prop.name}
-                                      onChange={(e) => {
-                                        const updated = [...newClassProperties];
-                                        updated[index].name = e.target.value;
-                                        setNewClassProperties(updated);
-                                      }}
-                                    />
-                                    <select
-                                      value={prop.dataType}
-                                      onChange={(e) => {
-                                        const updated = [...newClassProperties];
-                                        updated[index].dataType = e.target.value;
-                                        setNewClassProperties(updated);
-                                      }}
-                                      className="px-3 py-2 border rounded-md"
-                                    >
-                                      <option value="string">String</option>
-                                      <option value="number">Number</option>
-                                      <option value="boolean">Boolean</option>
-                                      <option value="text">Text</option>
-                                    </select>
-                                  </div>
-                                ))}
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="mt-2"
-                                  onClick={() => setNewClassProperties([...newClassProperties, { name: '', dataType: 'string' }])}
-                                >
-                                  Add Property
-                                </Button>
-                              </div>
-                              <div className="flex justify-end space-x-2">
-                                <Button variant="outline" onClick={() => setShowCreateClassModal(false)}>Cancel</Button>
-                                <Button onClick={handleCreateClass}>Create</Button>
-                              </div>
-                            </div>
-                          </DialogContent>
-                        </Dialog>
                         <Button onClick={fetchClasses} size="sm" variant="ghost">
                           <RotateCcw className="h-3 w-3" />
                         </Button>
@@ -696,15 +646,15 @@ export default function Home() {
                             <div key={i} className="h-8 bg-muted rounded animate-pulse" />
                           ))
                         ) : (
-                          classes.map((cls) => (
-                            <div key={cls.class} className="flex items-center justify-between">
+                          classes.map((cls: any) => (
+                            <div key={cls.class as string} className="flex items-center justify-between">
                               <Button
-                                onClick={() => handleClassSelect(cls.class)}
+                                onClick={() => handleClassSelect(cls.class as string)}
                                 variant={selectedClass === cls.class ? "default" : "ghost"}
                                 size="sm"
                                 className="flex-1 justify-start text-sm"
                               >
-                                {cls.class}
+                                {cls.class as string}
                               </Button>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -721,19 +671,19 @@ export default function Home() {
                                     <AlertDialogTrigger asChild>
                                       <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
                                         <Trash2 className="h-4 w-4 mr-2" />
-                                        Delete Collection
+                                        Delete {dbType === 'weaviate' ? 'Class' : 'Collection'}
                                       </DropdownMenuItem>
                                     </AlertDialogTrigger>
                                     <AlertDialogContent>
                                       <AlertDialogHeader>
-                                        <AlertDialogTitle>Delete Collection</AlertDialogTitle>
+                                        <AlertDialogTitle>Delete {dbType === 'weaviate' ? 'Class' : 'Collection'}</AlertDialogTitle>
                                         <AlertDialogDescription>
-                                          Are you sure you want to delete the "{cls.class}" collection? This will permanently delete all objects in this collection.
+                                          Are you sure you want to delete the &quot;{cls.class as string}&quot; {dbType === 'weaviate' ? 'class' : 'collection'}? This will permanently delete all objects in this {dbType === 'weaviate' ? 'class' : 'collection'}.
                                         </AlertDialogDescription>
                                       </AlertDialogHeader>
                                       <AlertDialogFooter>
                                         <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => handleDeleteClass(cls.class)}>
+                                        <AlertDialogAction onClick={() => handleDeleteClass(cls.class as string)}>
                                           Delete
                                         </AlertDialogAction>
                                       </AlertDialogFooter>
@@ -757,7 +707,7 @@ export default function Home() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
                         <CardTitle className="text-lg">
-                          {selectedClass ? `${selectedClass}` : 'Select a collection'}
+                          {selectedClass ? `${selectedClass}` : `Select a ${dbType === 'weaviate' ? 'class' : 'collection'}`}
                         </CardTitle>
                         {selectedClass && (
                           <Badge variant="secondary">
@@ -766,7 +716,7 @@ export default function Home() {
                         )}
                         {searchQuery && (
                           <Badge variant="outline">
-                            Search: "{searchQuery}"
+                            Search: &quot;{searchQuery}&quot;
                           </Badge>
                         )}
                       </div>
@@ -803,40 +753,6 @@ export default function Home() {
                             </Button>
                           )}
                         </div>
-                        <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-                          <DialogTrigger asChild>
-                            <Button disabled={!selectedClass} size="sm">
-                              <Plus className="h-4 w-4 mr-1" />
-                              Add
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Create Object in {selectedClass}</DialogTitle>
-                            </DialogHeader>
-                            <ScrollArea className="max-h-96">
-                              <div className="space-y-4 pr-4">
-                                {getClassProperties().map((prop) => (
-                                  <div key={prop.name}>
-                                    <Label>{prop.name} ({prop.dataType.join(', ')})</Label>
-                                    <Input
-                                      value={newObjectProperties[prop.name] || ''}
-                                      onChange={(e) => setNewObjectProperties({
-                                        ...newObjectProperties,
-                                        [prop.name]: e.target.value
-                                      })}
-                                      placeholder={`Enter ${prop.name}...`}
-                                    />
-                                  </div>
-                                ))}
-                                <div className="flex justify-end space-x-2 pt-4">
-                                  <Button variant="outline" onClick={() => setShowCreateModal(false)}>Cancel</Button>
-                                  <Button onClick={handleCreateObject}>Create</Button>
-                                </div>
-                              </div>
-                            </ScrollArea>
-                          </DialogContent>
-                        </Dialog>
                       </div>
                     </div>
                   </CardHeader>
@@ -867,24 +783,24 @@ export default function Home() {
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {objects.map((obj, index) => (
-                                  <TableRow key={obj.id || index}>
+                                {objects.map((obj: any, index) => (
+                                  <TableRow key={(obj.id as string) || index}>
                                     <TableCell>
                                       <input
                                         type="checkbox"
-                                        checked={selectedObjects.has(obj.id)}
-                                        onChange={() => toggleObjectSelection(obj.id)}
+                                        checked={selectedObjects.has(obj.id as string)}
+                                        onChange={() => toggleObjectSelection(obj.id as string)}
                                       />
                                     </TableCell>
                                     <TableCell className="font-mono text-xs">
-                                      {obj.id?.slice(0, 8)}...
+                                      {(obj.id as string)?.slice(0, 8)}...
                                     </TableCell>
                                     <TableCell>
                                       <div className="text-xs bg-muted p-2 rounded w-full">
                                         <pre className="whitespace-pre-wrap text-xs break-all">
                                           {searchQuery ? 
-                                            highlightSearchText(formatObjectProperties(obj.properties), searchQuery) :
-                                            formatObjectProperties(obj.properties)
+                                            highlightSearchText(formatObjectProperties(obj.properties as Record<string, unknown>), searchQuery) :
+                                            formatObjectProperties(obj.properties as Record<string, unknown>)
                                           }
                                         </pre>
                                       </div>
@@ -908,7 +824,7 @@ export default function Home() {
                                           <Edit className="h-3 w-3" />
                                         </Button>
                                         <Button 
-                                          onClick={() => handleDeleteObject(obj.id)}
+                                          onClick={() => handleDeleteObject(obj.id as string)}
                                           variant="destructive"
                                           size="sm"
                                           title="Delete"
@@ -980,7 +896,7 @@ export default function Home() {
                       <div className="text-center py-12 text-muted-foreground flex-1 flex items-center justify-center">
                         <div>
                           <Database className="mx-auto h-12 w-12 mb-4" />
-                          <p>Select a collection to view objects</p>
+                          <p>Select a {dbType === 'weaviate' ? 'class' : 'collection'} to view objects</p>
                         </div>
                       </div>
                     )}
@@ -998,11 +914,11 @@ export default function Home() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center">
                     <Database className="h-4 w-4 mr-2" />
-                    Total Collections
+                    Total {dbType === 'weaviate' ? 'Classes' : 'Collections'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{stats?.totalClasses || 0}</div>
+                  <div className="text-2xl font-bold">{(stats as any)?.totalClasses || 0}</div>
                 </CardContent>
               </Card>
               <Card>
@@ -1013,7 +929,7 @@ export default function Home() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{stats?.totalObjects || 0}</div>
+                  <div className="text-2xl font-bold">{(stats as any)?.totalObjects || 0}</div>
                 </CardContent>
               </Card>
               <Card>
@@ -1024,7 +940,7 @@ export default function Home() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-lg font-bold">{stats?.version || 'Unknown'}</div>
+                  <div className="text-lg font-bold">{(stats as any)?.version || 'Unknown'}</div>
                 </CardContent>
               </Card>
               <Card>
@@ -1035,25 +951,30 @@ export default function Home() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-sm font-mono">{stats?.nodeInfo || 'Unknown'}</div>
+                  <div className="text-sm font-mono">{(stats as any)?.nodeInfo || 'Unknown'}</div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Cluster Health */}
-            {stats?.clusterHealth && (
+            {/* Database-specific Performance Metrics */}
+            {(stats as any)?.performanceMetrics && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center">
                       <Server className="h-4 w-4 mr-2" />
-                      Cluster Nodes
+                      {dbType === 'qdrant' ? 'Collections' : 'Cluster Nodes'}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{stats.performanceMetrics?.totalNodes || 0}</div>
+                    <div className="text-2xl font-bold">
+                      {dbType === 'qdrant' ? ((stats as any).performanceMetrics?.totalCollections || 0) : ((stats as any).performanceMetrics?.totalNodes || 0)}
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      {stats.performanceMetrics?.healthyNodes || 0} healthy
+                      {dbType === 'qdrant' 
+                        ? `${(stats as any).performanceMetrics?.readyCollections || 0} ready`
+                        : `${(stats as any).performanceMetrics?.healthyNodes || 0} healthy`
+                      }
                     </div>
                   </CardContent>
                 </Card>
@@ -1061,13 +982,21 @@ export default function Home() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center">
                       <Activity className="h-4 w-4 mr-2" />
-                      Total Shards
+                      {dbType === 'qdrant' ? 'Vector Index' : 'Total Shards'}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{stats.performanceMetrics?.totalShards || 0}</div>
+                    <div className="text-2xl font-bold">
+                      {dbType === 'qdrant' 
+                        ? `${(((stats as any).performanceMetrics?.indexedVectors || 0) / Math.max((stats as any).performanceMetrics?.totalVectors || 1, 1) * 100).toFixed(1)}%`
+                        : ((stats as any).performanceMetrics?.totalShards || 0)
+                      }
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      {stats.performanceMetrics?.indexingShards || 0} indexing
+                      {dbType === 'qdrant' 
+                        ? `${(stats as any).performanceMetrics?.indexedVectors || 0} / ${(stats as any).performanceMetrics?.totalVectors || 0} indexed`
+                        : `${(stats as any).performanceMetrics?.indexingShards || 0} indexing`
+                      }
                     </div>
                   </CardContent>
                 </Card>
@@ -1075,31 +1004,48 @@ export default function Home() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center">
                       <Zap className="h-4 w-4 mr-2" />
-                      Batch Rate
+                      {dbType === 'qdrant' ? 'Avg Vector Size' : 'Batch Rate'}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{stats.performanceMetrics?.totalBatchRate?.toFixed(1) || '0.0'}</div>
-                    <div className="text-xs text-muted-foreground">ops/sec</div>
+                    <div className="text-2xl font-bold">
+                      {dbType === 'qdrant' 
+                        ? ((stats as any).qdrantMetrics?.averageVectorSize || 0)
+                        : `${(stats as any).performanceMetrics?.totalBatchRate?.toFixed(1) || '0.0'}`
+                      }
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {dbType === 'qdrant' ? 'dimensions' : 'ops/sec'}
+                    </div>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center">
                       <Clock className="h-4 w-4 mr-2" />
-                      Vector Queue
+                      {dbType === 'qdrant' ? 'Distance Metrics' : 'Vector Queue'}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{stats.performanceMetrics?.totalVectorQueue || 0}</div>
-                    <div className="text-xs text-muted-foreground">pending</div>
+                    <div className="text-2xl font-bold">
+                      {dbType === 'qdrant' 
+                        ? ((stats as any).qdrantMetrics?.distanceMetrics?.length || 0)
+                        : ((stats as any).performanceMetrics?.totalVectorQueue || 0)
+                      }
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {dbType === 'qdrant' 
+                        ? ((stats as any).qdrantMetrics?.distanceMetrics?.join(', ') || 'None')
+                        : 'pending'
+                      }
+                    </div>
                   </CardContent>
                 </Card>
               </div>
             )}
 
             {/* Node Health Status */}
-            {stats?.clusterHealth?.nodes && stats.clusterHealth.nodes.length > 0 && (
+            {(stats as any)?.clusterHealth?.nodes && (stats as any).clusterHealth.nodes.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -1109,7 +1055,7 @@ export default function Home() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {stats.clusterHealth.nodes.map((node, index) => (
+                    {(stats as any).clusterHealth.nodes.map((node: any, index: number) => (
                       <div key={node.name || index} className="flex items-center justify-between p-3 border rounded-lg">
                         <div className="flex items-center space-x-3">
                           <div className="flex items-center">
@@ -1141,7 +1087,7 @@ export default function Home() {
             )}
 
             {/* Shard Details */}
-            {stats?.shardDetails && stats.shardDetails.length > 0 && (
+            {(stats as any)?.shardDetails && (stats as any).shardDetails.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -1154,7 +1100,7 @@ export default function Home() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Node</TableHead>
-                        <TableHead>Collection</TableHead>
+                        <TableHead>{dbType === 'weaviate' ? 'Class' : 'Collection'}</TableHead>
                         <TableHead>Shard</TableHead>
                         <TableHead>Objects</TableHead>
                         <TableHead>Status</TableHead>
@@ -1162,7 +1108,7 @@ export default function Home() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {stats.shardDetails.map((shard, index) => (
+                      {(stats as any).shardDetails.map((shard: any) => (
                         <TableRow key={`${shard.nodeName}-${shard.shardName}`}>
                           <TableCell className="font-medium">{shard.nodeName}</TableCell>
                           <TableCell>{shard.className}</TableCell>
@@ -1187,29 +1133,149 @@ export default function Home() {
             {/* Collection Statistics */}
             <Card>
               <CardHeader>
-                <CardTitle>Collection Statistics</CardTitle>
+                <CardTitle>{dbType === 'weaviate' ? 'Class' : 'Collection'} Statistics</CardTitle>
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Collection</TableHead>
-                      <TableHead>Objects</TableHead>
-                      <TableHead>Properties</TableHead>
+                      <TableHead>{dbType === 'weaviate' ? 'Class' : 'Collection'}</TableHead>
+                      <TableHead>{dbType === 'weaviate' ? 'Objects' : 'Points'}</TableHead>
+                      {dbType === 'weaviate' ? (
+                        <TableHead>Properties</TableHead>
+                      ) : (
+                        <>
+                          <TableHead>Vector Size</TableHead>
+                          <TableHead>Distance</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Indexed</TableHead>
+                        </>
+                      )}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {stats?.classStats?.map((stat) => (
-                      <TableRow key={stat.name}>
-                        <TableCell className="font-medium">{stat.name}</TableCell>
-                        <TableCell>{stat.objectCount}</TableCell>
-                        <TableCell>{stat.properties}</TableCell>
-                      </TableRow>
-                    ))}
+                    {dbType === 'weaviate' ? (
+                      (stats as any)?.classStats?.map((stat: any) => (
+                        <TableRow key={stat.name}>
+                          <TableCell className="font-medium">{stat.name}</TableCell>
+                          <TableCell>{stat.objectCount}</TableCell>
+                          <TableCell>{stat.properties}</TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      (stats as any)?.collectionDetails?.map((collection: any) => (
+                        <TableRow key={collection.name}>
+                          <TableCell className="font-medium">{collection.name}</TableCell>
+                          <TableCell>{collection.objectCount}</TableCell>
+                          <TableCell>{collection.vectorSize}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{collection.distance}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center space-x-2">
+                              {collection.status === 'green' && <CheckCircle className="h-4 w-4 text-green-500" />}
+                              {collection.status === 'indexing' && <Clock className="h-4 w-4 text-yellow-500" />}
+                              {collection.status === 'Error' && <XCircle className="h-4 w-4 text-red-500" />}
+                              <span className="text-xs">{collection.status}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">
+                              {collection.indexingProgress}%
+                              <div className="text-xs text-muted-foreground">
+                                {collection.indexedVectors}/{collection.objectCount}
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </CardContent>
             </Card>
+
+            {/* Qdrant-specific Information */}
+            {dbType === 'qdrant' && (stats as any)?.qdrantMetrics && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <Activity className="h-5 w-5 mr-2" />
+                      Vector Index Status
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {(stats as any).qdrantMetrics.indexingStatus?.map((status: any, index: number) => (
+                        <div key={status.collection || index} className="flex items-center justify-between p-3 border rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            <div className="flex items-center">
+                              {status.status === 'green' && <CheckCircle className="h-4 w-4 text-green-500" />}
+                              {status.status === 'indexing' && <Clock className="h-4 w-4 text-yellow-500" />}
+                              {status.status === 'Error' && <XCircle className="h-4 w-4 text-red-500" />}
+                            </div>
+                            <div>
+                              <div className="font-medium">{status.collection}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {status.indexingProgress}% indexed
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-medium">
+                              {status.indexedVectors}/{status.totalVectors}
+                            </div>
+                            <div className="text-xs text-muted-foreground">vectors</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <Settings className="h-5 w-5 mr-2" />
+                      Configuration Summary
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-sm font-medium">Distance Metrics</Label>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {(stats as any).qdrantMetrics.distanceMetrics?.map((metric: any) => (
+                            <Badge key={metric} variant="secondary">{metric}</Badge>
+                          ))}
+                          {(!(stats as any).qdrantMetrics.distanceMetrics || (stats as any).qdrantMetrics.distanceMetrics.length === 0) && (
+                            <Badge variant="outline">None configured</Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium">Collections Status</Label>
+                        <div className="grid grid-cols-2 gap-4 mt-2">
+                          <div className="text-center p-2 border rounded">
+                            <div className="text-lg font-bold text-green-600">
+                              {(stats as any).qdrantMetrics.collectionsReady || 0}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Ready</div>
+                          </div>
+                          <div className="text-center p-2 border rounded">
+                            <div className="text-lg font-bold text-yellow-600">
+                              {(stats as any).qdrantMetrics.collectionsIndexing || 0}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Indexing</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>
@@ -1225,7 +1291,7 @@ export default function Home() {
               <div>
                 <Label className="text-sm font-medium">Object ID</Label>
                 <div className="mt-1 p-2 bg-muted rounded font-mono text-sm">
-                  {viewingObject?.id}
+                  {(viewingObject as any)?.id}
                 </div>
               </div>
               <div>
@@ -1233,20 +1299,20 @@ export default function Home() {
                 <div className="mt-1 p-4 bg-muted rounded">
                   <pre className="text-sm whitespace-pre-wrap">
                     {searchQuery ? 
-                      highlightSearchText(JSON.stringify(viewingObject?.properties, null, 2), searchQuery) :
-                      JSON.stringify(viewingObject?.properties, null, 2)
+                      highlightSearchText(JSON.stringify((viewingObject as any)?.properties, null, 2), searchQuery) :
+                      JSON.stringify((viewingObject as any)?.properties, null, 2)
                     }
                   </pre>
                 </div>
               </div>
-              {viewingObject?._additional && (
+              {(viewingObject as any)?._additional && (
                 <div>
                   <Label className="text-sm font-medium">Additional Information</Label>
                   <div className="mt-1 p-4 bg-muted rounded">
                     <pre className="text-sm whitespace-pre-wrap">
                       {searchQuery ? 
-                        highlightSearchText(JSON.stringify(viewingObject._additional, null, 2), searchQuery) :
-                        JSON.stringify(viewingObject._additional, null, 2)
+                        highlightSearchText(JSON.stringify((viewingObject as any)._additional, null, 2), searchQuery) :
+                        JSON.stringify((viewingObject as any)._additional, null, 2)
                       }
                     </pre>
                   </div>
@@ -1265,11 +1331,11 @@ export default function Home() {
           </DialogHeader>
           <ScrollArea className="max-h-96">
             <div className="space-y-4 pr-4">
-              {getClassProperties().map((prop) => (
+              {getClassProperties().map((prop: any) => (
                 <div key={prop.name}>
                   <Label>{prop.name} ({prop.dataType.join(', ')})</Label>
                   <Input
-                    value={newObjectProperties[prop.name] || ''}
+                    value={(newObjectProperties as any)[prop.name] || ''}
                     onChange={(e) => setNewObjectProperties({
                       ...newObjectProperties,
                       [prop.name]: e.target.value

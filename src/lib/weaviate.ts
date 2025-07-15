@@ -1,4 +1,4 @@
-import weaviate, { WeaviateClient } from 'weaviate-ts-client';
+import weaviate, { WeaviateClient, ApiKey } from 'weaviate-ts-client';
 
 class WeaviateService {
   private client: WeaviateClient;
@@ -12,14 +12,13 @@ class WeaviateService {
       cleanUrl = url.slice(0, -3);
     }
     
-    const config: any = {
+    const config = {
       scheme: cleanUrl.startsWith('https') ? 'https' : 'http',
       host: cleanUrl.replace(/https?:\/\//, ''),
+      ...(process.env.WEAVIATE_API_KEY && { 
+        apiKey: new ApiKey(process.env.WEAVIATE_API_KEY) 
+      })
     };
-
-    if (process.env.WEAVIATE_API_KEY) {
-      config.apiKey = process.env.WEAVIATE_API_KEY;
-    }
 
     this.client = weaviate.client(config);
   }
@@ -45,44 +44,21 @@ class WeaviateService {
 
   async getClassObjects(className: string, limit: number = 20, offset: number = 0) {
     try {
-      // Try with offset first
-      try {
-        let query = this.client.data
-          .getter()
-          .withClassName(className)
-          .withLimit(limit);
-        
-        query = query.withOffset(offset);
-        
-        console.log(`Fetching objects for ${className}: limit=${limit}, offset=${offset}`);
-        
-        const result = await query.do();
-        const objects = result.objects || [];
-        
-        console.log(`Retrieved ${objects.length} objects for ${className} (limit=${limit}, offset=${offset})`);
-        
-        return objects;
-      } catch (offsetError) {
-        console.warn(`Offset not supported, falling back to client-side pagination:`, offsetError);
-        
-        // Fallback: fetch more objects and slice client-side
-        const fallbackLimit = Math.min(limit + offset, 1000); // Cap at 1000 to prevent memory issues
-        
-        const query = this.client.data
-          .getter()
-          .withClassName(className)
-          .withLimit(fallbackLimit);
-        
-        const result = await query.do();
-        const allObjects = result.objects || [];
-        
-        // Client-side pagination
-        const paginatedObjects = allObjects.slice(offset, offset + limit);
-        
-        console.log(`Fallback pagination: fetched ${allObjects.length}, returning ${paginatedObjects.length} objects`);
-        
-        return paginatedObjects;
+      const query = this.client.data
+        .getter()
+        .withClassName(className)
+        .withLimit(Math.min(limit + offset, 1000)); // Cap at 1000 to prevent memory issues
+
+      const result = await query.do();
+      const allObjects = result.objects || [];
+
+      // Client-side pagination
+      if (offset > 0) {
+        console.warn(`Weaviate: Offset not natively supported, using client-side pagination (offset=${offset}, limit=${limit})`);
       }
+      const paginatedObjects = allObjects.slice(offset, offset + limit);
+
+      return paginatedObjects;
     } catch (error) {
       console.error(`Error fetching objects for class ${className}:`, error);
       return [];
@@ -139,10 +115,10 @@ class WeaviateService {
         
         if (result.data?.Get?.[className]?.length > 0) {
           // Transform to match REST API format with properties object
-          return result.data.Get[className].map(obj => ({
-            id: obj._additional?.id,
+          return result.data.Get[className].map((obj: Record<string, unknown>) => ({
+            id: (obj._additional as Record<string, unknown>)?.id,
             properties: Object.fromEntries(
-              properties.map(p => [p.name, obj[p.name]]).filter(([_, value]) => value !== undefined)
+              properties.map(p => [p.name, obj[p.name as keyof typeof obj]]).filter(([, value]) => value !== undefined)
             ),
             _additional: obj._additional
           }));
@@ -153,7 +129,7 @@ class WeaviateService {
 
       // Fallback to property-based search using REST API
       const searchableProps = properties.filter(p => 
-        p.dataType.includes('string') || p.dataType.includes('text')
+        (p.dataType && p.dataType.includes('string')) || (p.dataType && p.dataType.includes('text'))
       );
 
       if (searchableProps.length === 0) {
@@ -172,7 +148,7 @@ class WeaviateService {
         if (!obj.properties) return false;
         
         return searchableProps.some(prop => {
-          const value = obj.properties[prop.name];
+          const value = obj.properties?.[prop.name as string];
           return value && 
                  typeof value === 'string' && 
                  value.toLowerCase().includes(query.toLowerCase());
@@ -197,7 +173,7 @@ class WeaviateService {
     }
   }
 
-  async createObject(className: string, properties: any) {
+  async createObject(className: string, properties: Record<string, unknown>) {
     try {
       return await this.client.data
         .creator()
@@ -210,7 +186,7 @@ class WeaviateService {
     }
   }
 
-  async updateObject(id: string, className: string, properties: any) {
+  async updateObject(id: string, className: string, properties: Record<string, unknown>) {
     try {
       return await this.client.data
         .updater()
@@ -247,7 +223,7 @@ class WeaviateService {
     }
   }
 
-  async createClass(classDefinition: any) {
+  async createClass(classDefinition: Record<string, unknown>) {
     try {
       return await this.client.schema.classCreator().withClass(classDefinition).do();
     } catch (error) {
@@ -276,11 +252,11 @@ class WeaviateService {
 
       for (const cls of schema.classes || []) {
         try {
-          const objects = await this.getClassObjects(cls.class, 1);
-          const count = await this.getClassObjectCount(cls.class);
+          await this.getClassObjects(cls.class!, 1);
+          const count = await this.getClassObjectCount(cls.class!);
           totalObjects += count;
           classStats.push({
-            name: cls.class,
+            name: cls.class!,
             objectCount: count,
             properties: cls.properties?.length || 0
           });
@@ -314,7 +290,7 @@ class WeaviateService {
       const url = process.env.WEAVIATE_URL || 'http://localhost:8080';
       const cleanUrl = url.endsWith('/v1') ? url : `${url}/v1`;
       
-      const headers: any = {
+      const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
       
@@ -342,7 +318,7 @@ class WeaviateService {
       const url = process.env.WEAVIATE_URL || 'http://localhost:8080';
       const cleanUrl = url.endsWith('/v1') ? url : `${url}/v1`;
       
-      const headers: any = {
+      const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
       
@@ -376,7 +352,7 @@ class WeaviateService {
       // Extract performance metrics from nodes
       const performanceMetrics = {
         totalNodes: clusterNodes.nodes?.length || 0,
-        healthyNodes: clusterNodes.nodes?.filter(n => n.status === 'HEALTHY').length || 0,
+        healthyNodes: clusterNodes.nodes?.filter((n: Record<string, unknown>) => n.status === 'HEALTHY').length || 0,
         totalShards: 0,
         indexingShards: 0,
         totalBatchRate: 0,
@@ -396,7 +372,7 @@ class WeaviateService {
           }
 
           if (node.shards) {
-            performanceMetrics.indexingShards += node.shards.filter(s => s.vectorIndexingStatus === 'INDEXING').length;
+            performanceMetrics.indexingShards += node.shards.filter((s: Record<string, unknown>) => s.vectorIndexingStatus === 'INDEXING').length;
             
             for (const shard of node.shards) {
               performanceMetrics.totalVectorQueue += shard.vectorQueueLength || 0;
@@ -452,7 +428,7 @@ class WeaviateService {
           await this.deleteObject(id, className);
           results.push({ id, success: true });
         } catch (error) {
-          results.push({ id, success: false, error: error.message });
+          results.push({ id, success: false, error: error instanceof Error ? error.message : 'Unknown error' });
         }
       }
       return results;

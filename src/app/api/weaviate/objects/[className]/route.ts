@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { weaviateService } from '@/lib/weaviate';
+import { qdrantService } from '@/lib/qdrant';
 
 export async function GET(
   request: Request,
@@ -11,7 +12,19 @@ export async function GET(
     const limit = parseInt(url.searchParams.get('limit') || '20');
     const offset = parseInt(url.searchParams.get('offset') || '0');
     
-    const result = await weaviateService.getClassObjectsWithCount(className, limit, offset);
+    // Get database type from cookie or default to environment variable
+    const cookieHeader = request.headers.get('cookie') || '';
+    const cookies = Object.fromEntries(
+      cookieHeader.split(';').map(c => {
+        const [key, value] = c.trim().split('=');
+        return [key, value];
+      }).filter(([key]) => key)
+    );
+    
+    const dbType = cookies['db-type'] || process.env.DATABASE_TYPE || 'weaviate';
+    const service = dbType === 'qdrant' ? qdrantService : weaviateService;
+    
+    const result = await service.getClassObjectsWithCount(className, limit, offset);
     
     return NextResponse.json({
       objects: result.objects,
@@ -27,7 +40,7 @@ export async function GET(
     console.error('Error fetching objects:', error);
     return NextResponse.json({ 
       objects: [], 
-      pagination: { currentPage: 1, totalPages: 1, totalItems: 0, pageSize: limit, hasMore: false },
+      pagination: { currentPage: 1, totalPages: 1, totalItems: 0, pageSize: 20, hasMore: false },
       error: 'Failed to fetch objects' 
     }, { status: 500 });
   }
@@ -40,7 +53,20 @@ export async function POST(
   try {
     const { className } = await params;
     const body = await request.json();
-    const result = await weaviateService.createObject(className, body.properties);
+    
+    // Get database type from cookie or default to environment variable
+    const cookieHeader = request.headers.get('cookie') || '';
+    const cookies = Object.fromEntries(
+      cookieHeader.split(';').map(c => {
+        const [key, value] = c.trim().split('=');
+        return [key, value];
+      }).filter(([key]) => key)
+    );
+    
+    const dbType = cookies['db-type'] || process.env.DATABASE_TYPE || 'weaviate';
+    const service = dbType === 'qdrant' ? qdrantService : weaviateService;
+    
+    const result = await service.createObject(className, body.properties);
     return NextResponse.json({ success: true, result });
   } catch (error) {
     console.error('Error creating object:', error);
