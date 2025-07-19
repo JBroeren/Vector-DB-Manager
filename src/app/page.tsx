@@ -19,23 +19,34 @@ import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { 
+  DatabaseClass, 
+  DatabaseObject, 
+  DatabaseStats, 
+  DatabaseProperty,
+  ClusterNode,
+  ShardDetail,
+  ClassStat,
+  CollectionDetail,
+  IndexingStatus
+} from '@/types';
 
 export default function Home() {
-  const [classes, setClasses] = useState<Record<string, unknown>[]>([]);
+  const [classes, setClasses] = useState<DatabaseClass[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedClass, setSelectedClass] = useState('');
-  const [objects, setObjects] = useState<Record<string, unknown>[]>([]);
+  const [objects, setObjects] = useState<DatabaseObject[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [viewingObject, setViewingObject] = useState<Record<string, unknown> | null>(null);
-  const [editingObject, setEditingObject] = useState<Record<string, unknown> | null>(null);
-  const [newObjectProperties, setNewObjectProperties] = useState({});
-  const [selectedObjects, setSelectedObjects] = useState(new Set());
+  const [viewingObject, setViewingObject] = useState<DatabaseObject | null>(null);
+  const [editingObject, setEditingObject] = useState<DatabaseObject | null>(null);
+  const [newObjectProperties, setNewObjectProperties] = useState<Record<string, unknown>>({});
+  const [selectedObjects, setSelectedObjects] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('stats');
-  const [stats, setStats] = useState<Record<string, unknown> | null>(null);
+  const [stats, setStats] = useState<DatabaseStats | null>(null);
   const [pagination, setPagination] = useState({
     currentPage: 1,
     totalPages: 1,
@@ -351,14 +362,14 @@ export default function Home() {
     }
   };
 
-  const handleViewObject = (obj: Record<string, unknown>) => {
+  const handleViewObject = (obj: DatabaseObject) => {
     setViewingObject(obj);
     setShowViewModal(true);
   };
 
-  const handleEditObject = (obj: Record<string, unknown>) => {
+  const handleEditObject = (obj: DatabaseObject) => {
     setEditingObject(obj);
-    setNewObjectProperties((obj as Record<string, unknown>).properties as Record<string, unknown> || {});
+    setNewObjectProperties(obj.properties || {});
     setShowEditModal(true);
   };
 
@@ -366,7 +377,7 @@ export default function Home() {
     if (!editingObject || !selectedClass) return;
     
     try {
-      const response = await fetch(`/api/weaviate/objects/${selectedClass}/${(editingObject as Record<string, unknown>).id}`, {
+      const response = await fetch(`/api/weaviate/objects/${selectedClass}/${editingObject.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ properties: newObjectProperties })
@@ -416,9 +427,9 @@ export default function Home() {
     }
   };
 
-  const getClassProperties = () => {
-    const selectedClassData = classes.find(cls => (cls as any).class === selectedClass);
-    return (selectedClassData as any)?.properties || [];
+  const getClassProperties = (): DatabaseProperty[] => {
+    const selectedClassData = classes.find(cls => cls.class === selectedClass);
+    return selectedClassData?.properties || [];
   };
 
   const toggleObjectSelection = (objectId: string) => {
@@ -646,15 +657,15 @@ export default function Home() {
                             <div key={i} className="h-8 bg-muted rounded animate-pulse" />
                           ))
                         ) : (
-                          classes.map((cls: any) => (
-                            <div key={cls.class as string} className="flex items-center justify-between">
+                          classes.map((cls: DatabaseClass) => (
+                            <div key={cls.class} className="flex items-center justify-between">
                               <Button
-                                onClick={() => handleClassSelect(cls.class as string)}
+                                onClick={() => handleClassSelect(cls.class)}
                                 variant={selectedClass === cls.class ? "default" : "ghost"}
                                 size="sm"
                                 className="flex-1 justify-start text-sm"
                               >
-                                {cls.class as string}
+                                {cls.class}
                               </Button>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -678,12 +689,12 @@ export default function Home() {
                                       <AlertDialogHeader>
                                         <AlertDialogTitle>Delete {dbType === 'weaviate' ? 'Class' : 'Collection'}</AlertDialogTitle>
                                         <AlertDialogDescription>
-                                          Are you sure you want to delete the &quot;{cls.class as string}&quot; {dbType === 'weaviate' ? 'class' : 'collection'}? This will permanently delete all objects in this {dbType === 'weaviate' ? 'class' : 'collection'}.
+                                          Are you sure you want to delete the &quot;{cls.class}&quot; {dbType === 'weaviate' ? 'class' : 'collection'}? This will permanently delete all objects in this {dbType === 'weaviate' ? 'class' : 'collection'}.
                                         </AlertDialogDescription>
                                       </AlertDialogHeader>
                                       <AlertDialogFooter>
                                         <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => handleDeleteClass(cls.class as string)}>
+                                        <AlertDialogAction onClick={() => handleDeleteClass(cls.class)}>
                                           Delete
                                         </AlertDialogAction>
                                       </AlertDialogFooter>
@@ -783,24 +794,24 @@ export default function Home() {
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {objects.map((obj: any, index) => (
-                                  <TableRow key={(obj.id as string) || index}>
+                                {objects.map((obj: DatabaseObject, index) => (
+                                  <TableRow key={obj.id || index}>
                                     <TableCell>
                                       <input
                                         type="checkbox"
-                                        checked={selectedObjects.has(obj.id as string)}
-                                        onChange={() => toggleObjectSelection(obj.id as string)}
+                                        checked={selectedObjects.has(obj.id)}
+                                        onChange={() => toggleObjectSelection(obj.id)}
                                       />
                                     </TableCell>
                                     <TableCell className="font-mono text-xs">
-                                      {(obj.id as string)?.slice(0, 8)}...
+                                      {obj.id?.slice(0, 8)}...
                                     </TableCell>
                                     <TableCell>
                                       <div className="text-xs bg-muted p-2 rounded w-full">
                                         <pre className="whitespace-pre-wrap text-xs break-all">
                                           {searchQuery ? 
-                                            highlightSearchText(formatObjectProperties(obj.properties as Record<string, unknown>), searchQuery) :
-                                            formatObjectProperties(obj.properties as Record<string, unknown>)
+                                            highlightSearchText(formatObjectProperties(obj.properties), searchQuery) :
+                                            formatObjectProperties(obj.properties)
                                           }
                                         </pre>
                                       </div>
@@ -824,7 +835,7 @@ export default function Home() {
                                           <Edit className="h-3 w-3" />
                                         </Button>
                                         <Button 
-                                          onClick={() => handleDeleteObject(obj.id as string)}
+                                          onClick={() => handleDeleteObject(obj.id)}
                                           variant="destructive"
                                           size="sm"
                                           title="Delete"
@@ -918,7 +929,7 @@ export default function Home() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{(stats as any)?.totalClasses || 0}</div>
+                  <div className="text-2xl font-bold">{stats?.totalClasses || 0}</div>
                 </CardContent>
               </Card>
               <Card>
@@ -929,7 +940,7 @@ export default function Home() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{(stats as any)?.totalObjects || 0}</div>
+                  <div className="text-2xl font-bold">{stats?.totalObjects || 0}</div>
                 </CardContent>
               </Card>
               <Card>
@@ -940,7 +951,7 @@ export default function Home() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-lg font-bold">{(stats as any)?.version || 'Unknown'}</div>
+                  <div className="text-lg font-bold">{stats?.version || 'Unknown'}</div>
                 </CardContent>
               </Card>
               <Card>
@@ -951,13 +962,13 @@ export default function Home() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-sm font-mono">{(stats as any)?.nodeInfo || 'Unknown'}</div>
+                  <div className="text-sm font-mono">{stats?.nodeInfo || 'Unknown'}</div>
                 </CardContent>
               </Card>
             </div>
 
             {/* Database-specific Performance Metrics */}
-            {(stats as any)?.performanceMetrics && (
+            {stats?.performanceMetrics && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <Card>
                   <CardHeader className="pb-2">
@@ -968,12 +979,12 @@ export default function Home() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">
-                      {dbType === 'qdrant' ? ((stats as any).performanceMetrics?.totalCollections || 0) : ((stats as any).performanceMetrics?.totalNodes || 0)}
+                      {dbType === 'qdrant' ? (stats.performanceMetrics?.totalCollections || 0) : (stats.performanceMetrics?.totalNodes || 0)}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {dbType === 'qdrant' 
-                        ? `${(stats as any).performanceMetrics?.readyCollections || 0} ready`
-                        : `${(stats as any).performanceMetrics?.healthyNodes || 0} healthy`
+                        ? `${stats.performanceMetrics?.readyCollections || 0} ready`
+                        : `${stats.performanceMetrics?.healthyNodes || 0} healthy`
                       }
                     </div>
                   </CardContent>
@@ -988,14 +999,14 @@ export default function Home() {
                   <CardContent>
                     <div className="text-2xl font-bold">
                       {dbType === 'qdrant' 
-                        ? `${(((stats as any).performanceMetrics?.indexedVectors || 0) / Math.max((stats as any).performanceMetrics?.totalVectors || 1, 1) * 100).toFixed(1)}%`
-                        : ((stats as any).performanceMetrics?.totalShards || 0)
+                        ? `${((stats.performanceMetrics?.indexedVectors || 0) / Math.max(stats.performanceMetrics?.totalVectors || 1, 1) * 100).toFixed(1)}%`
+                        : (stats.performanceMetrics?.totalShards || 0)
                       }
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {dbType === 'qdrant' 
-                        ? `${(stats as any).performanceMetrics?.indexedVectors || 0} / ${(stats as any).performanceMetrics?.totalVectors || 0} indexed`
-                        : `${(stats as any).performanceMetrics?.indexingShards || 0} indexing`
+                        ? `${stats.performanceMetrics?.indexedVectors || 0} / ${stats.performanceMetrics?.totalVectors || 0} indexed`
+                        : `${stats.performanceMetrics?.indexingShards || 0} indexing`
                       }
                     </div>
                   </CardContent>
@@ -1010,8 +1021,8 @@ export default function Home() {
                   <CardContent>
                     <div className="text-2xl font-bold">
                       {dbType === 'qdrant' 
-                        ? ((stats as any).qdrantMetrics?.averageVectorSize || 0)
-                        : `${(stats as any).performanceMetrics?.totalBatchRate?.toFixed(1) || '0.0'}`
+                        ? (stats.qdrantMetrics?.averageVectorSize || 0)
+                        : `${stats.performanceMetrics?.totalBatchRate?.toFixed(1) || '0.0'}`
                       }
                     </div>
                     <div className="text-xs text-muted-foreground">
@@ -1029,13 +1040,13 @@ export default function Home() {
                   <CardContent>
                     <div className="text-2xl font-bold">
                       {dbType === 'qdrant' 
-                        ? ((stats as any).qdrantMetrics?.distanceMetrics?.length || 0)
-                        : ((stats as any).performanceMetrics?.totalVectorQueue || 0)
+                        ? (stats.qdrantMetrics?.distanceMetrics?.length || 0)
+                        : (stats.performanceMetrics?.totalVectorQueue || 0)
                       }
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {dbType === 'qdrant' 
-                        ? ((stats as any).qdrantMetrics?.distanceMetrics?.join(', ') || 'None')
+                        ? (stats.qdrantMetrics?.distanceMetrics?.join(', ') || 'None')
                         : 'pending'
                       }
                     </div>
@@ -1045,7 +1056,7 @@ export default function Home() {
             )}
 
             {/* Node Health Status */}
-            {(stats as any)?.clusterHealth?.nodes && (stats as any).clusterHealth.nodes.length > 0 && (
+            {stats?.clusterHealth?.nodes && stats.clusterHealth.nodes.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -1055,7 +1066,7 @@ export default function Home() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {(stats as any).clusterHealth.nodes.map((node: any, index: number) => (
+                    {stats.clusterHealth.nodes.map((node: ClusterNode, index: number) => (
                       <div key={node.name || index} className="flex items-center justify-between p-3 border rounded-lg">
                         <div className="flex items-center space-x-3">
                           <div className="flex items-center">
@@ -1087,7 +1098,7 @@ export default function Home() {
             )}
 
             {/* Shard Details */}
-            {(stats as any)?.shardDetails && (stats as any).shardDetails.length > 0 && (
+            {stats?.shardDetails && stats.shardDetails.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -1108,7 +1119,7 @@ export default function Home() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(stats as any).shardDetails.map((shard: any) => (
+                      {stats.shardDetails.map((shard: ShardDetail) => (
                         <TableRow key={`${shard.nodeName}-${shard.shardName}`}>
                           <TableCell className="font-medium">{shard.nodeName}</TableCell>
                           <TableCell>{shard.className}</TableCell>
@@ -1155,7 +1166,7 @@ export default function Home() {
                   </TableHeader>
                   <TableBody>
                     {dbType === 'weaviate' ? (
-                      (stats as any)?.classStats?.map((stat: any) => (
+                      stats?.classStats?.map((stat: ClassStat) => (
                         <TableRow key={stat.name}>
                           <TableCell className="font-medium">{stat.name}</TableCell>
                           <TableCell>{stat.objectCount}</TableCell>
@@ -1163,7 +1174,7 @@ export default function Home() {
                         </TableRow>
                       ))
                     ) : (
-                      (stats as any)?.collectionDetails?.map((collection: any) => (
+                      stats?.collectionDetails?.map((collection: CollectionDetail) => (
                         <TableRow key={collection.name}>
                           <TableCell className="font-medium">{collection.name}</TableCell>
                           <TableCell>{collection.objectCount}</TableCell>
@@ -1196,7 +1207,7 @@ export default function Home() {
             </Card>
 
             {/* Qdrant-specific Information */}
-            {dbType === 'qdrant' && (stats as any)?.qdrantMetrics && (
+            {dbType === 'qdrant' && stats?.qdrantMetrics && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Card>
                   <CardHeader>
@@ -1207,7 +1218,7 @@ export default function Home() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {(stats as any).qdrantMetrics.indexingStatus?.map((status: any, index: number) => (
+                      {stats.qdrantMetrics.indexingStatus?.map((status: IndexingStatus, index: number) => (
                         <div key={status.collection || index} className="flex items-center justify-between p-3 border rounded-lg">
                           <div className="flex items-center space-x-3">
                             <div className="flex items-center">
@@ -1246,10 +1257,10 @@ export default function Home() {
                       <div>
                         <Label className="text-sm font-medium">Distance Metrics</Label>
                         <div className="flex flex-wrap gap-2 mt-2">
-                          {(stats as any).qdrantMetrics.distanceMetrics?.map((metric: any) => (
+                          {stats.qdrantMetrics.distanceMetrics?.map((metric: string) => (
                             <Badge key={metric} variant="secondary">{metric}</Badge>
                           ))}
-                          {(!(stats as any).qdrantMetrics.distanceMetrics || (stats as any).qdrantMetrics.distanceMetrics.length === 0) && (
+                          {(!stats.qdrantMetrics.distanceMetrics || stats.qdrantMetrics.distanceMetrics.length === 0) && (
                             <Badge variant="outline">None configured</Badge>
                           )}
                         </div>
@@ -1259,13 +1270,13 @@ export default function Home() {
                         <div className="grid grid-cols-2 gap-4 mt-2">
                           <div className="text-center p-2 border rounded">
                             <div className="text-lg font-bold text-green-600">
-                              {(stats as any).qdrantMetrics.collectionsReady || 0}
+                              {stats.qdrantMetrics.collectionsReady || 0}
                             </div>
                             <div className="text-xs text-muted-foreground">Ready</div>
                           </div>
                           <div className="text-center p-2 border rounded">
                             <div className="text-lg font-bold text-yellow-600">
-                              {(stats as any).qdrantMetrics.collectionsIndexing || 0}
+                              {stats.qdrantMetrics.collectionsIndexing || 0}
                             </div>
                             <div className="text-xs text-muted-foreground">Indexing</div>
                           </div>
@@ -1291,7 +1302,7 @@ export default function Home() {
               <div>
                 <Label className="text-sm font-medium">Object ID</Label>
                 <div className="mt-1 p-2 bg-muted rounded font-mono text-sm">
-                  {(viewingObject as any)?.id}
+                  {viewingObject?.id}
                 </div>
               </div>
               <div>
@@ -1299,20 +1310,20 @@ export default function Home() {
                 <div className="mt-1 p-4 bg-muted rounded">
                   <pre className="text-sm whitespace-pre-wrap">
                     {searchQuery ? 
-                      highlightSearchText(JSON.stringify((viewingObject as any)?.properties, null, 2), searchQuery) :
-                      JSON.stringify((viewingObject as any)?.properties, null, 2)
+                      highlightSearchText(JSON.stringify(viewingObject?.properties, null, 2), searchQuery) :
+                      JSON.stringify(viewingObject?.properties, null, 2)
                     }
                   </pre>
                 </div>
               </div>
-              {(viewingObject as any)?._additional && (
+              {viewingObject?._additional && (
                 <div>
                   <Label className="text-sm font-medium">Additional Information</Label>
                   <div className="mt-1 p-4 bg-muted rounded">
                     <pre className="text-sm whitespace-pre-wrap">
                       {searchQuery ? 
-                        highlightSearchText(JSON.stringify((viewingObject as any)._additional, null, 2), searchQuery) :
-                        JSON.stringify((viewingObject as any)._additional, null, 2)
+                        highlightSearchText(JSON.stringify(viewingObject._additional, null, 2), searchQuery) :
+                        JSON.stringify(viewingObject._additional, null, 2)
                       }
                     </pre>
                   </div>
@@ -1331,11 +1342,11 @@ export default function Home() {
           </DialogHeader>
           <ScrollArea className="max-h-96">
             <div className="space-y-4 pr-4">
-              {getClassProperties().map((prop: any) => (
+              {getClassProperties().map((prop: DatabaseProperty) => (
                 <div key={prop.name}>
                   <Label>{prop.name} ({prop.dataType.join(', ')})</Label>
                   <Input
-                    value={(newObjectProperties as any)[prop.name] || ''}
+                    value={String(newObjectProperties[prop.name] || '')}
                     onChange={(e) => setNewObjectProperties({
                       ...newObjectProperties,
                       [prop.name]: e.target.value

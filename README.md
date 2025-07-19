@@ -13,33 +13,49 @@ Vector DB Manager provides a comprehensive dashboard for managing vector databas
 - **Statistics Dashboard**: Real-time database metrics, cluster health monitoring, and performance tracking
 - **Modern UI**: Responsive design with dark/light theme support
 
+## Screenshots
+
+### Weaviate Manager Dashboard
+
+![Weaviate Manager Dashboard](screenshots/weaviate-dashboard.png)
+
+### Qdrant Manager Dashboard
+
+![Qdrant Manager Dashboard](screenshots/qdrant-dashboard.png)
+
+> **Note**: To add the actual screenshot images, save them as `screenshots/weaviate-dashboard.png` and `screenshots/qdrant-dashboard.png` in the project root directory.
+
 ## Installation
 
 ### Prerequisites
+
 - Node.js 18+
 - Weaviate or Qdrant instance (local or cloud)
 
 ### Setup
 
 1. **Clone the repository**
+
    ```bash
    git clone <repository-url>
    cd w-manager
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Configure environment variables**
    Create a `.env.local` file in the root directory:
+
    ```env
    # For Weaviate
    WEAVIATE_URL=http://localhost:8080
    WEAVIATE_API_KEY=your-api-key-here
 
-   # For Qdrant  
+   # For Qdrant
    QDRANT_URL=http://localhost:6333
    QDRANT_API_KEY=your-api-key-here
 
@@ -48,6 +64,7 @@ Vector DB Manager provides a comprehensive dashboard for managing vector databas
    ```
 
 4. **Run the development server**
+
    ```bash
    npm run dev
    ```
@@ -64,10 +81,10 @@ npm start
 
 ## Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `WEAVIATE_URL` | Weaviate instance URL | `http://localhost:8080` |
-| `WEAVIATE_API_KEY` | Weaviate API key (if authentication enabled) | - |
-| `QDRANT_URL` | Qdrant instance URL | `http://localhost:6333` |
-| `QDRANT_API_KEY` | Qdrant API key (if authentication enabled) | - |
-| `DATABASE_TYPE` | Default database type (`weaviate` or `qdrant`) | `weaviate` |
+| Variable           | Description                                    | Default                 |
+| ------------------ | ---------------------------------------------- | ----------------------- |
+| `WEAVIATE_URL`     | Weaviate instance URL                          | `http://localhost:8080` |
+| `WEAVIATE_API_KEY` | Weaviate API key (if authentication enabled)   | -                       |
+| `QDRANT_URL`       | Qdrant instance URL                            | `http://localhost:6333` |
+| `QDRANT_API_KEY`   | Qdrant API key (if authentication enabled)     | -                       |
+| `DATABASE_TYPE`    | Default database type (`weaviate` or `qdrant`) | `weaviate`              |
