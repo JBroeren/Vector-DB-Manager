@@ -23,8 +23,6 @@ Vector DB Manager provides a comprehensive dashboard for managing vector databas
 
 ![Qdrant Manager Dashboard](screenshots/qdrant-dashboard.png)
 
-> **Note**: To add the actual screenshot images, save them as `screenshots/weaviate-dashboard.png` and `screenshots/qdrant-dashboard.png` in the project root directory.
-
 ## Installation
 
 ### Prerequisites
