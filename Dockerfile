@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/root/.npm \
 # -------- Builder layer --------
 FROM base AS builder
 WORKDIR /app
-ENV NODE_ENV=development
+ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm \
   npm ci
