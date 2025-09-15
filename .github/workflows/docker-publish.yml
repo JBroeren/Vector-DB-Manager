@@ -69,3 +69,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Make package public
+        if: github.event_name != 'pull_request'
+        run: |
+          gh api --method PATCH /user/packages/container/${GITHUB_REPOSITORY##*/} \
+          --field visibility=public
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
