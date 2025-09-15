@@ -8,20 +8,13 @@ WORKDIR /app
 # Install libc6-compat for some npm packages if needed, and add git if required
 RUN apk add --no-cache libc6-compat
 
-# -------- Dependencies layer --------
-FROM base AS deps
-WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN --mount=type=cache,target=/root/.npm \
-  npm ci --omit=dev
-
 # -------- Builder layer --------
 FROM base AS builder
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm \
-  npm ci
+  npm ci --include=dev
 
 # Copy rest of the source
 COPY . .
@@ -44,7 +37,11 @@ EXPOSE 3000
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/package-lock.json ./package-lock.json
+
+# Install only production dependencies
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci --omit=dev
 
 # Next.js needs these at runtime for standalone mode if used in future
 # If you switch to output: 'standalone', adjust the copy commands accordingly
